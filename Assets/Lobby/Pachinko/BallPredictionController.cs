@@ -8,9 +8,9 @@ using System.Linq;
 public class BallPredictionController : MonoBehaviour
 {
     [Header("模拟参数")]
-    public int maxAttempts = 10000;             // 最大尝试次数
-    public float minThrustForce = 10f;         // 最小推力
-    public float maxThrustForce = 15f;         // 最大推力
+    public int maxAttempts = 1000;             // 最大尝试次数
+    public float minThrustForce = 9f;         // 最小推力
+    public float maxThrustForce = 20f;         // 最大推力
     public float ballSpawnOffset = 0.5f;      // 小球生成位置的Y轴偏移
     public int requiredSuccessCount = 100;     // 每个目标点需要的成功次数
 
