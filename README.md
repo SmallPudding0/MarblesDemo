@@ -1,3 +1,5 @@
 使用BallPredictionController脚本控制小球落点。
+
 点击运行后脚本会异步计算1000次物理模拟，然后取出目标点成功的一组数据给小球施加弹力。
-模拟次数、目标点可以在脚本中设置。
+
+模拟次数、目标点可以在场景中的BallPredictionController对象中设置。
