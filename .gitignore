@@ -72,3 +72,5 @@ crashlytics-build.properties
 
 
 .specstory/
+.vscode/
+HisPreCtrl/

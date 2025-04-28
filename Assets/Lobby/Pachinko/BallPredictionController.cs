@@ -13,6 +13,8 @@ public class BallPredictionController : MonoBehaviour
     public float maxThrustForce = 20f;         // 最大推力
     public float ballSpawnOffset = 0.5f;      // 小球生成位置的Y轴偏移
     public int requiredSuccessCount = 100;     // 每个目标点需要的成功次数
+    public Vector3 leftBallPosition; // 最左侧小球位置
+    public Vector3 rightBallPosition; // 最右侧小球位置
 
     [Header("引用设置")]
     public GameObject ballPrefab;    // 添加对球预制体的引用
@@ -47,6 +49,7 @@ public class BallPredictionController : MonoBehaviour
     // 存储成功的力量值区间
     private Dictionary<Transform, List<(float minForce, float maxForce)>> targetForceRanges = new Dictionary<Transform, List<(float, float)>>();
     private int totalSimulationAttempts = 0;
+
 
     void Start()
     {
@@ -116,14 +119,14 @@ public class BallPredictionController : MonoBehaviour
                     Debug.LogWarning($"目标点 {target.name} 尝试次数过多 ({targetAttempts[target]}次)，跳过此目标点");
                     continue;
                 }
-                
+
                 if (successCount < requiredSuccessCount)
                 {
                     Debug.Log($"当前目标点 {target.name} 成功 ({successCount}次)");
                     targetToTry = target;
                     break;
                 }
-                else 
+                else
                 {
                     continue;
                 }
@@ -145,6 +148,9 @@ public class BallPredictionController : MonoBehaviour
             float currentForce = GenerateForceValue(targetToTry);
             Vector2 basePosition = springTransform.position + Vector3.up * ballSpawnOffset;
             Vector2 baseForce = Vector2.up * currentForce;
+
+            // 在左右位置之间随机选择一个位置
+            basePosition.x = Random.Range(leftBallPosition.x, rightBallPosition.x);
 
             var (finalPosition, hitTarget) = SimulateAndRecord(basePosition, baseForce);
             totalSimulationAttempts++;
@@ -216,7 +222,7 @@ public class BallPredictionController : MonoBehaviour
             Debug.Log($"目标点 {kvp.Key.name}: 成功率 {successRate:F2}%, 成功 {kvp.Value.successCount} 次, 总尝试 {targetAttempts[kvp.Key]} 次");
         }
 
-        
+
 
         isComputing = false;
         computationStatus = "计算完成";
@@ -288,11 +294,8 @@ public class BallPredictionController : MonoBehaviour
         simulatedBall.SetActive(true);
 
         Rigidbody2D rb = simulatedBall.GetComponent<Rigidbody2D>();
+        BallController ballContrl = simulatedBall.AddComponent<BallController>();
 
-        // 添加碰撞检测脚本
-        var collisionDetector = simulatedBall.AddComponent<CollisionDetector>();
-        collisionDetector.targetPoints = targetPoints;
-        collisionDetector.acceptableDistance = acceptableDistance;
         rb.velocity = Vector2.zero;
         rb.AddForce(baseForce, ForceMode2D.Impulse);
 
@@ -314,10 +317,10 @@ public class BallPredictionController : MonoBehaviour
             currentTrajectory.Add(finalPosition);
 
             // 检查是否与任何目标点发生碰撞
-            if (collisionDetector.hasCollided)
+            if (ballContrl.hasCollided)
             {
-                Debug.Log($"与目标点 {collisionDetector.hitTarget.name} 发生碰撞！");
-                Debug.Log($"模拟落点: {finalPosition}, 目标点位置: {collisionDetector.hitTarget.position}");
+                Debug.Log($"与目标点 {ballContrl.hitTarget.name} 发生碰撞！");
+                Debug.Log($"模拟落点: {finalPosition}, 目标点位置: {ballContrl.hitTarget.position}");
                 break;
             }
 
@@ -336,24 +339,36 @@ public class BallPredictionController : MonoBehaviour
         // 清理临时对象
         Destroy(simulatedBall);
 
-        return (finalPosition, collisionDetector.hitTarget);
+        return (finalPosition, ballContrl.hitTarget);
     }
 
-    // 碰撞检测脚本
-    private class CollisionDetector : MonoBehaviour
+    // 当弹簧释放时调用此方法
+    public void OnSpringReleased(GameObject ball)
     {
-        public Transform[] targetPoints;
-        public float acceptableDistance;
-        public bool hasCollided = false;
-        public Transform hitTarget;
+        // 获取目标点
+        Transform targetPoint = useRandomTarget ?
+            targetPoints[Random.Range(0, targetPoints.Length)] :
+            selectedTargetPoint;
 
-        private void OnCollisionEnter2D(Collision2D collision)
+        if (targetPoint != null)
         {
-            // 检查是否与任何目标点发生碰撞
-            if (collision.gameObject.CompareTag("Edge"))
+            // 获取该目标点的所有成功发射参数
+            if (launchParamsCache.ContainsKey(targetPoint) && launchParamsCache[targetPoint].Count > 0)
             {
-                hasCollided = true;
-                hitTarget = collision.transform;
+                // 找到最接近当前小球X轴位置的成功位置
+                var currentX = ball.transform.position.x;
+                var closestParams = launchParamsCache[targetPoint]
+                    .OrderBy(p => Mathf.Abs(p.position.x - currentX))
+                    .FirstOrDefault();
+
+                if (closestParams != default)
+                {
+                    var ballController = ball.GetComponent<BallController>();
+                    if (ballController != null)
+                    {
+                        ballController.SetTargetPosition(closestParams.position, closestParams.force);
+                    }
+                }
             }
         }
     }
@@ -439,7 +454,7 @@ public class BallPredictionController : MonoBehaviour
         {
             // 将缓存中的参数按力量大小排序
             var sortedParams = launchParamsCache[target].OrderBy(p => p.force.magnitude).ToList();
-            
+
             // 将排序后的参数分成三组：小、中、大
             int groupSize = Mathf.Max(1, sortedParams.Count / 3);
             var smallGroup = sortedParams.Take(groupSize).ToList();

@@ -47,10 +47,7 @@ public class FlipperController : MonoBehaviour
                     Rigidbody2D rb = collider.GetComponent<Rigidbody2D>();
                     if (rb != null && predictor != null)
                     {
-                        var (bestPos, bestForce) = predictor.GetRandomLaunchParams();
-                        rb.velocity = Vector2.zero;
-                        rb.AddForce(bestForce, ForceMode2D.Impulse);
-                        rb.transform.position = bestPos;
+                        predictor.OnSpringReleased(collider.gameObject);
                     }
                 }
             }

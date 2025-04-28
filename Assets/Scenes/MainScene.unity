@@ -10325,11 +10325,13 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 640dd31a3174e454f8f509ee927a312a, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  maxAttempts: 1000
+  maxAttempts: 10000
   minThrustForce: 9
   maxThrustForce: 20
-  ballSpawnOffset: 0.5
-  requiredSuccessCount: 100
+  ballSpawnOffset: 1
+  requiredSuccessCount: 1000
+  leftBallPosition: {x: 11.24, y: 0, z: 0}
+  rightBallPosition: {x: 12.5, y: 0, z: 0}
   ballPrefab: {fileID: 5624972572507796559, guid: 8f5c0714dded3d044a23998e6e1a2fa8, type: 3}
   targetPoints:
   - {fileID: 701353365}
@@ -10348,7 +10350,7 @@ MonoBehaviour:
   showDebugVisuals: 1
   trajectoryColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
   debugPointSize: 0.2
-  selectedTargetPoint: {fileID: 224504868}
+  selectedTargetPoint: {fileID: 1192924969}
   useRandomTarget: 0
   computationStatus: "\u672A\u5F00\u59CB\u8BA1\u7B97"
 --- !u!4 &1762804441
