@@ -36,7 +36,6 @@ public class BallController : MonoBehaviour
             // 如果到达目标位置
             if (Vector2.Distance(transform.position, currentTarget) < 0.01f)
             {
-                Debug.Log("到达目标起点");
                 transform.position = (Vector3)targetPosition;
                 isMovingToPosition = false;
                 

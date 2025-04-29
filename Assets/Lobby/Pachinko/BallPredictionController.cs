@@ -5,6 +5,10 @@ using System.Collections;
 using UnityEngine.UI;
 using System.Linq;
 
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
+
 public class BallPredictionController : MonoBehaviour
 {
     [Header("模拟参数")]
@@ -22,6 +26,7 @@ public class BallPredictionController : MonoBehaviour
     public float acceptableDistance = 0.5f;   // 可接受的误差范围
     public Transform springTransform;  // 弹簧的位置
     public Transform spawnArea; // Area where balls will spawn
+    public BallPredictionData predictionData; // 数据持久化引用
 
     [Header("调试设置")]
     public bool showDebugVisuals = true;           // 是否显示调试视觉效果
@@ -50,7 +55,6 @@ public class BallPredictionController : MonoBehaviour
     private Dictionary<Transform, List<(float minForce, float maxForce)>> targetForceRanges = new Dictionary<Transform, List<(float, float)>>();
     private int totalSimulationAttempts = 0;
 
-
     void Start()
     {
         if (springTransform == null)
@@ -58,9 +62,43 @@ public class BallPredictionController : MonoBehaviour
             Debug.LogError("请设置弹簧位置！");
             return;
         }
+
+        // 初始化数据结构
         launchParamsCache = new Dictionary<Transform, List<(Vector2, Vector2)>>();
         successRates = new Dictionary<Transform, (int, int)>();
-        StartCoroutine(PrecomputeAllTargets());
+        targetForceRanges = new Dictionary<Transform, List<(float, float)>>();
+        targetAttempts = new Dictionary<Transform, int>();
+
+        // 检查是否有有效的持久化数据
+        if (predictionData != null && predictionData.isDataValid)
+        {
+            Debug.Log("正在加载持久化数据...");
+            predictionData.LoadData(out launchParamsCache, out successRates, out targetForceRanges);
+            totalSimulationAttempts = predictionData.totalSimulationAttempts;
+
+            // 初始化目标点状态
+            foreach (var target in targetPoints)
+            {
+                if (successRates.ContainsKey(target))
+                {
+                    var (successCount, totalAttempts) = successRates[target];
+                    targetStatus[target] = $"成功: {successCount}/{requiredSuccessCount}";
+                    targetAttempts[target] = totalAttempts;
+                }
+                else
+                {
+                    targetStatus[target] = "等待计算";
+                    targetAttempts[target] = 0;
+                }
+            }
+
+            Debug.Log("持久化数据加载完成");
+        }
+        else
+        {
+            Debug.Log("没有有效的持久化数据，开始新的模拟...");
+            StartCoroutine(PrecomputeAllTargets());
+        }
     }
 
     // 异步预计算所有目标点
@@ -77,6 +115,7 @@ public class BallPredictionController : MonoBehaviour
         targetForceRanges.Clear();
         totalSimulationAttempts = 0;
         targetAttempts = new Dictionary<Transform, int>();
+
 
         // 初始化成功率统计和力量值区间
         foreach (var target in targetPoints)
@@ -180,6 +219,8 @@ public class BallPredictionController : MonoBehaviour
             // 每计算100次输出一次进度
             if (totalSimulationAttempts % 100 == 0)
             {
+                float progress = (float)System.Array.IndexOf(targetPoints, targetToTry) / targetPoints.Length * 100f;
+                computationStatus = $"正在计算目标点: {targetToTry?.name ?? "无"}，进度: {progress:F1}%";
                 Debug.Log($"当前进度: 总尝试 {totalSimulationAttempts} 次");
                 foreach (var target in targetPoints)
                 {
@@ -222,36 +263,18 @@ public class BallPredictionController : MonoBehaviour
             Debug.Log($"目标点 {kvp.Key.name}: 成功率 {successRate:F2}%, 成功 {kvp.Value.successCount} 次, 总尝试 {targetAttempts[kvp.Key]} 次");
         }
 
-
+        // 在计算完成后保存数据
+        SavePredictionData();
 
         isComputing = false;
-        computationStatus = "计算完成";
+        computationStatus = "计算完成 (100%)";
         Debug.Log("所有目标点计算完成！");
     }
 
     // 生成力量值
     private float GenerateForceValue(Transform target)
     {
-        // 这里想优化一下，按区间生成力量值，但是会导致最后小球轨迹计算结果过于接近
-        // // 如果有该目标点的成功力量值区间，优先在这些区间内生成
-        // if (targetForceRanges.ContainsKey(target) && targetForceRanges[target].Count > 0)
-        // {
-        //     // 检查是否在成功区间内尝试了太多次
-        //     var (successCount, totalAttempts) = successRates[target];
-        //     if (totalAttempts > 50 && successCount < totalAttempts * 0.2f) // 如果尝试超过50次且成功率低于20%
-        //     {
-        //         Debug.Log($"目标点 {target.name} 在成功区间内尝试 {totalAttempts} 次，成功率过低 ({successCount}/{totalAttempts})，切换到全局范围");
-        //         return Random.Range(minThrustForce, maxThrustForce);
-        //     }
-
-        //     // 随机选择一个成功区间
-        //     var ranges = targetForceRanges[target];
-        //     var range = ranges[Random.Range(0, ranges.Count)];
-        //     // 在区间内生成一个随机值
-        //     return Random.Range(range.minForce, range.maxForce);
-        // }
-
-        // 如果没有成功区间，使用全局范围
+        // 使用全局范围
         return Random.Range(minThrustForce, maxThrustForce);
     }
 
@@ -372,7 +395,7 @@ public class BallPredictionController : MonoBehaviour
             }
         }
     }
-
+#if UNITY_EDITOR
     private void OnDrawGizmos()
     {
         if (!showDebugVisuals) return;
@@ -426,67 +449,24 @@ public class BallPredictionController : MonoBehaviour
             Gizmos.DrawWireSphere(springTransform.position, 0.5f);
         }
     }
+#endif
 
-    public (Vector2 position, Vector2 force) GetRandomLaunchParams()
+    private void SavePredictionData()
     {
-        // 获取目标点
-        Transform targetPoint = useRandomTarget ?
-            targetPoints[Random.Range(0, targetPoints.Length)] :
-            selectedTargetPoint;
-
-        if (targetPoint != null)
+        if (predictionData != null)
         {
-            var (bestPos, bestForce) = GetRandomLaunchParams(targetPoint);
-            Debug.Log($"发射到目标点: {targetPoint.name}, 力度: {bestForce}");
-            return (bestPos, bestForce);
+            predictionData.SaveData(launchParamsCache, successRates, targetForceRanges, totalSimulationAttempts);
+
+            // 只在编辑器中执行保存操作
+#if UNITY_EDITOR
+
+            EditorUtility.SetDirty(predictionData);
+            AssetDatabase.SaveAssets();
+            Debug.Log("数据已保存到磁盘");
+
+#endif
+
+            Debug.Log("数据已更新到 ScriptableObject");
         }
-        else
-        {
-            Debug.LogWarning("未选择目标点！");
-            return (springTransform.position, Vector2.up * minThrustForce);
-        }
-    }
-
-    // 获取指定目标点的随机发射参数
-    public (Vector2 position, Vector2 force) GetRandomLaunchParams(Transform target)
-    {
-        if (launchParamsCache.ContainsKey(target) && launchParamsCache[target].Count > 0)
-        {
-            // 将缓存中的参数按力量大小排序
-            var sortedParams = launchParamsCache[target].OrderBy(p => p.force.magnitude).ToList();
-
-            // 将排序后的参数分成三组：小、中、大
-            int groupSize = Mathf.Max(1, sortedParams.Count / 3);
-            var smallGroup = sortedParams.Take(groupSize).ToList();
-            var mediumGroup = sortedParams.Skip(groupSize).Take(groupSize).ToList();
-            var largeGroup = sortedParams.Skip(groupSize * 2).ToList();
-
-            // 随机选择一个组（权重：小30%，中40%，大30%）
-            float random = Random.value;
-            List<(Vector2 position, Vector2 force)> selectedGroup;
-            if (random < 0.3f)
-                selectedGroup = smallGroup;
-            else if (random < 0.7f)
-                selectedGroup = mediumGroup;
-            else
-                selectedGroup = largeGroup;
-
-            // 从选中的组中随机选择一个参数
-            int randomIndex = Random.Range(0, selectedGroup.Count);
-            var launchParams = selectedGroup[randomIndex];
-
-            // 重新模拟一次以验证落点
-            var (simulatedPosition, hitTarget) = SimulateAndRecord(launchParams.position, launchParams.force);
-            Debug.Log($"从缓存中获取的发射参数:");
-            Debug.Log($"- 初始位置: {launchParams.position}");
-            Debug.Log($"- 发射力: {launchParams.force}");
-            Debug.Log($"- 模拟落点: {simulatedPosition}");
-            Debug.Log($"- 目标点位置: {target.position}");
-            Debug.Log($"- 距离误差: {Vector2.Distance(simulatedPosition, target.position)}");
-
-            return launchParams;
-        }
-        Debug.LogWarning($"未找到目标点 {target.name} 的有效发射参数");
-        return (Vector2.zero, Vector2.zero);
     }
 }
