@@ -366,7 +366,7 @@ public class BallPredictionController : MonoBehaviour
     }
 
     // 当弹簧释放时调用此方法
-    public void OnSpringReleased(GameObject ball)
+    public void OnSpringReleased(GameObject ball, float springPercentage)
     {
         // 获取目标点
         Transform targetPoint = useRandomTarget ?
@@ -380,16 +380,65 @@ public class BallPredictionController : MonoBehaviour
             {
                 // 找到最接近当前小球X轴位置的成功位置
                 var currentX = ball.transform.position.x;
-                var closestParams = launchParamsCache[targetPoint]
-                    .OrderBy(p => Mathf.Abs(p.position.x - currentX))
-                    .FirstOrDefault();
 
-                if (closestParams != default)
+                // 根据X轴位置和弹簧位置获取合适的参数
+                var suitableParams = launchParamsCache[targetPoint]
+                    .Where(p => Mathf.Abs(p.position.x - currentX) < 0.1f) // 先筛选X轴位置相近的
+                    .OrderBy(p => p.force.y) // 按力量从小到大排序
+                    .ToList();
+
+                if (suitableParams.Count > 0)
                 {
+                    // 分析力量值的分布
+                    float minForce = suitableParams[0].force.y;
+                    float maxForce = suitableParams[suitableParams.Count - 1].force.y;
+                    float forceRange = maxForce - minForce;
+
+                    // 根据弹簧位置选择不同区间的力量
+                    int startIndex, endIndex;
+                    if (springPercentage >= 0.7f) // 弹簧拉到70%以上，取最大力量区间
+                    {
+                        // 找到力量值在后30%范围内的起始位置
+                        float targetForce = minForce + forceRange * 0.7f;
+                        startIndex = suitableParams.FindIndex(p => p.force.y >= targetForce);
+                        endIndex = suitableParams.Count - 1;
+                    }
+                    else if (springPercentage >= 0.3f) // 弹簧拉到30%-70%之间，取中等力量区间
+                    {
+                        // 找到力量值在中间40%范围内的起始和结束位置
+                        float minTargetForce = minForce + forceRange * 0.3f;
+                        float maxTargetForce = minForce + forceRange * 0.7f;
+                        startIndex = suitableParams.FindIndex(p => p.force.y >= minTargetForce);
+                        endIndex = suitableParams.FindLastIndex(p => p.force.y <= maxTargetForce);
+                    }
+                    else // 弹簧拉到30%以下，取最小力量区间
+                    {
+                        // 找到力量值在前30%范围内的结束位置
+                        float targetForce = minForce + forceRange * 0.3f;
+                        startIndex = 0;
+                        endIndex = suitableParams.FindLastIndex(p => p.force.y <= targetForce);
+                    }
+
+                    // 确保索引有效
+                    if (startIndex < 0) startIndex = 0;
+                    if (endIndex >= suitableParams.Count) endIndex = suitableParams.Count - 1;
+                    if (startIndex > endIndex) startIndex = endIndex;
+
+                    // 在选定的区间内随机选择一个参数
+                    int randomIndex = Random.Range(startIndex, endIndex + 1);
+                    var selectedParams = suitableParams[randomIndex];
                     var ballController = ball.GetComponent<BallController>();
                     if (ballController != null)
                     {
-                        ballController.SetTargetPosition(closestParams.position, closestParams.force);
+                        // 打印日志
+                        float xDistance = Mathf.Abs(ball.transform.position.x - selectedParams.position.x);
+                        Debug.Log($"弹簧位置百分比: {springPercentage:F2}, " +
+                                $"选择的力量: {selectedParams.force.y:F2}, " +
+                                $"X轴距离: {xDistance:F2}, " +
+                                $"力量区间: {(springPercentage >= 0.7f ? "最大" : springPercentage >= 0.3f ? "中等" : "最小")}, " +
+                                $"力量范围: {minForce:F2}-{maxForce:F2}");
+
+                        ballController.SetTargetPosition(selectedParams.position, selectedParams.force);
                     }
                 }
             }

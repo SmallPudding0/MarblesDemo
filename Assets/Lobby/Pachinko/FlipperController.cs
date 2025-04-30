@@ -5,7 +5,7 @@ public class FlipperController : MonoBehaviour
     [Header("发射设置")]
     public float pullDownDistance = 1f; // Distance to pull down the platform
     public float thrustForce = 10f; // Force applied to the ball
-    public float minForce = 2f;
+    public float baseMinForce = 2f; // 基础最小力量
     public float downSpeed = 5f; // Speed of the platform moving down
     public float upSpeed = 15f; // Speed of the platform moving up
 
@@ -38,16 +38,19 @@ public class FlipperController : MonoBehaviour
     {
         if (isPulledDown && !autoTrigger)
         {
+            // 计算弹簧位置相对于总行程的百分比
+            float percentage = Vector3.Distance(transform.position, originalPosition) / pullDownDistance;
+
             // Apply upward thrust to nearby balls
             Collider2D[] colliders = Physics2D.OverlapCircleAll(transform.position, 2.5f);
             foreach (var collider in colliders)
             {
                 if (collider.CompareTag("Ball"))
                 {
-                    Rigidbody2D rb = collider.GetComponent<Rigidbody2D>();
-                    if (rb != null && predictor != null)
+                    BallController ballController = collider.GetComponent<BallController>();
+                    if (ballController != null && predictor != null)
                     {
-                        predictor.OnSpringReleased(collider.gameObject);
+                        predictor.OnSpringReleased(collider.gameObject, percentage);
                     }
                 }
             }
