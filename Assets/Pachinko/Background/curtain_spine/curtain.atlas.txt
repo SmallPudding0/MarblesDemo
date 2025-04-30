@@ -1,0 +1,7 @@
+curtain.png
+size:1428,1243
+filter:Linear,Linear
+pma:true
+curtain
+bounds:0,0,1428,1243
+offsets:0,1,1428,1244
