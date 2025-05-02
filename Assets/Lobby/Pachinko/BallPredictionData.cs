@@ -16,24 +16,41 @@ public class BallPredictionData : ScriptableObject
         public List<(float minForce, float maxForce)> forceRanges = new List<(float, float)>();
     }
 
-    public List<TargetData> targetDatas = new List<TargetData>();
-    public int totalSimulationAttempts;
-    public bool isDataValid;
+    [System.Serializable]
+    public class PinsConfigurationData
+    {
+        public string configurationName;  // 柱子组合的名称
+        public List<TargetData> targetDatas = new List<TargetData>();
+        public int totalSimulationAttempts;
+        public bool isDataValid;
+    }
+
+    public List<PinsConfigurationData> pinsConfigurations = new List<PinsConfigurationData>();
+    public string currentConfigurationName;  // 当前使用的柱子组合名称
 
     public void ClearData()
     {
-        targetDatas.Clear();
-        totalSimulationAttempts = 0;
-        isDataValid = false;
+        pinsConfigurations.Clear();
+        currentConfigurationName = "";
     }
 
-    public void SaveData(Dictionary<Transform, List<(Vector2 position, Vector2 force)>> launchParamsCache,
+    public void SaveData(string configurationName,
+                        Dictionary<Transform, List<(Vector2 position, Vector2 force)>> launchParamsCache,
                         Dictionary<Transform, (int successCount, int totalAttempts)> successRates,
                         Dictionary<Transform, List<(float minForce, float maxForce)>> targetForceRanges,
                         int totalAttempts)
     {
-        ClearData();
-        totalSimulationAttempts = totalAttempts;
+        // 查找或创建配置
+        var config = pinsConfigurations.Find(c => c.configurationName == configurationName);
+        if (config == null)
+        {
+            config = new PinsConfigurationData { configurationName = configurationName };
+            pinsConfigurations.Add(config);
+        }
+
+        // 清除旧数据
+        config.targetDatas.Clear();
+        config.totalSimulationAttempts = totalAttempts;
 
         foreach (var kvp in launchParamsCache)
         {
@@ -64,13 +81,15 @@ public class BallPredictionData : ScriptableObject
                 targetData.forceRanges = targetForceRanges[target];
             }
 
-            targetDatas.Add(targetData);
+            config.targetDatas.Add(targetData);
         }
 
-        isDataValid = true;
+        config.isDataValid = true;
+        currentConfigurationName = configurationName;
     }
 
-    public void LoadData(out Dictionary<Transform, List<(Vector2 position, Vector2 force)>> launchParamsCache,
+    public bool LoadData(string configurationName,
+                        out Dictionary<Transform, List<(Vector2 position, Vector2 force)>> launchParamsCache,
                         out Dictionary<Transform, (int successCount, int totalAttempts)> successRates,
                         out Dictionary<Transform, List<(float minForce, float maxForce)>> targetForceRanges)
     {
@@ -78,7 +97,13 @@ public class BallPredictionData : ScriptableObject
         successRates = new Dictionary<Transform, (int successCount, int totalAttempts)>();
         targetForceRanges = new Dictionary<Transform, List<(float minForce, float maxForce)>>();
 
-        foreach (var targetData in targetDatas)
+        var config = pinsConfigurations.Find(c => c.configurationName == configurationName);
+        if (config == null || !config.isDataValid)
+        {
+            return false;
+        }
+
+        foreach (var targetData in config.targetDatas)
         {
             var positions = new List<(Vector2 position, Vector2 force)>();
             for (int i = 0; i < targetData.successfulPositions.Count; i++)
@@ -95,5 +120,8 @@ public class BallPredictionData : ScriptableObject
                 targetForceRanges[target] = targetData.forceRanges;
             }
         }
+
+        currentConfigurationName = configurationName;
+        return true;
     }
 } 
