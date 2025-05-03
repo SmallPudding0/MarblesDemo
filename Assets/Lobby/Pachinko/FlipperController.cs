@@ -42,7 +42,7 @@ public class FlipperController : MonoBehaviour
             float percentage = Vector3.Distance(transform.position, originalPosition) / pullDownDistance;
 
             // Apply upward thrust to nearby balls
-            Collider2D[] colliders = Physics2D.OverlapCircleAll(transform.position, 2.5f);
+            Collider2D[] colliders = Physics2D.OverlapCircleAll(transform.position, 3.5f);
             foreach (var collider in colliders)
             {
                 if (collider.CompareTag("Ball"))
