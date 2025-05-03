@@ -19254,7 +19254,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   gameSpeed: 1
   enableSpeedControl: 1
-  targetFrameRate: 300
+  targetFrameRate: 60
   limitFrameRate: 1
 --- !u!1 &1846596313
 GameObject:

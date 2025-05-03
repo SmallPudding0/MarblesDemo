@@ -452,15 +452,9 @@ public class BallPredictionController : MonoBehaviour
                     // 获取当前小球位置
                     var currentX = ball.transform.position.x;
 
-                    // 先按力量大小排序，再按X轴距离排序
+                    // 只按力量大小排序
                     var suitableParams = currentLaunchParams[targetPoint]
-                        .Select(p => new {
-                            Params = p,
-                            Distance = Mathf.Abs(p.position.x - currentX)
-                        })
-                        .OrderBy(p => p.Params.force.y)
-                        .ThenBy(p => p.Distance)
-                        .Select(p => p.Params)
+                        .OrderBy(p => p.force.y)
                         .ToList();
 
                     if (suitableParams.Count > 0)
@@ -497,9 +491,22 @@ public class BallPredictionController : MonoBehaviour
                         if (endIndex >= suitableParams.Count) endIndex = suitableParams.Count - 1;
                         if (startIndex > endIndex) startIndex = endIndex;
 
-                        // 在选定的区间内随机选择一个参数
-                        int randomIndex = Random.Range(startIndex, endIndex + 1);
-                        var selectedParams = suitableParams[randomIndex];
+                        // 在选定的区间内筛选x距离小于0.1的参数
+                        var closeParams = suitableParams
+                            .Skip(startIndex)
+                            .Take(endIndex - startIndex + 1)
+                            .Where(p => Mathf.Abs(p.position.x - currentX) < 0.1f)
+                            .ToList();
+
+                        // 如果没有找到x距离小于0.1的参数，则使用距离最近的参数
+                        var selectedParams = closeParams.Count > 0
+                            ? closeParams[Random.Range(0, closeParams.Count)]
+                            : suitableParams
+                                .Skip(startIndex)
+                                .Take(endIndex - startIndex + 1)
+                                .OrderBy(p => Mathf.Abs(p.position.x - currentX))
+                                .First();
+
                         var ballController = ball.GetComponent<BallController>();
                         if (ballController != null)
                         {
