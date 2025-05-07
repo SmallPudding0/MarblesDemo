@@ -12,6 +12,7 @@ using UnityEditor;
 public class BallPredictionController : MonoBehaviour
 {
     [Header("模拟参数")]
+    public int maxSimulationAttempts = 100000;     // 最大尝试次数
     public float minThrustForce = 9f;         // 最小推力
     public float maxThrustForce = 20f;         // 最大推力
     public int requiredSuccessCount = 100;     // 每个目标点需要的成功次数
@@ -50,11 +51,11 @@ public class BallPredictionController : MonoBehaviour
     [SerializeField]
     private string computationStatus = "未开始计算";
     [SerializeField]
-    private Dictionary<Transform, string> targetStatus = new Dictionary<Transform, string>();
+    private Dictionary<Transform, string> targetStatus = new Dictionary<Transform, string>();    // 目标点状态
 
     // 存储成功的力量值区间
-    private Dictionary<Transform, List<(float minForce, float maxForce)>> targetForceRanges = new Dictionary<Transform, List<(float, float)>>();
-    private int totalSimulationAttempts = 0;
+    private Dictionary<Transform, List<(float minForce, float maxForce)>> targetForceRanges = new Dictionary<Transform, List<(float, float)>>();    // 目标点成功力量区间
+    private int totalSimulationAttempts = 0;    // 总尝试次数
 
     void Start()
     {
@@ -167,7 +168,7 @@ public class BallPredictionController : MonoBehaviour
             targetForceRanges[target] = new List<(float, float)>();
         }
 
-        while (true)
+        while (totalSimulationAttempts < maxSimulationAttempts)
         {
             // 检查是否所有目标点都已完成
             bool allTargetsCompleted = true;
@@ -387,7 +388,7 @@ public class BallPredictionController : MonoBehaviour
 
         Vector2 finalPosition = Vector2.zero;
         float simulationTime = 0f;
-        float maxSimulationTime = 5f;
+        float maxSimulationTime = 20f;
 
         // 保存当前的物理模拟模式
         var previousSimulationMode = Physics2D.simulationMode;
@@ -411,10 +412,9 @@ public class BallPredictionController : MonoBehaviour
             }
 
             // 如果小球停止运动也结束模拟
-            if (rb.velocity.magnitude < 0.1f)
+            if (rb.velocity.magnitude < 0.01f)
             {
-                Debug.Log($"模拟结束 - 小球停止运动");
-                Debug.Log($"最终落点: {finalPosition}");
+                Debug.Log($"模拟结束 - 小球停止运动 最终落点: {finalPosition}");
                 break;
             }
         }
