@@ -40,12 +40,6 @@ public class BallPredictionController : MonoBehaviour
     public Transform selectedTargetPoint; // 在Inspector中选择的目标点
     public bool useRandomTarget = false;  // 是否随机选择目标点
 
-    // 存储每个目标点对应的发射参数和成功率
-    private Dictionary<Transform, List<(Vector2 position, Vector2 force)>> launchParamsCache;
-    private Dictionary<Transform, (int successCount, int totalAttempts)> successRates;
-    private List<Vector2> currentTrajectory;        // 当前轨迹
-    private bool isComputing = false;  // 是否正在计算中
-
     // 在检视窗口中显示的进度信息
     [Header("进度信息")]
     [SerializeField]
@@ -53,9 +47,11 @@ public class BallPredictionController : MonoBehaviour
     [SerializeField]
     private Dictionary<Transform, string> targetStatus = new Dictionary<Transform, string>();    // 目标点状态
 
-    // 存储成功的力量值区间
-    private Dictionary<Transform, List<(float minForce, float maxForce)>> targetForceRanges = new Dictionary<Transform, List<(float, float)>>();    // 目标点成功力量区间
     private int totalSimulationAttempts = 0;    // 总尝试次数
+
+    private Dictionary<Transform, BallPredictionData.TargetData> targetDatas = new Dictionary<Transform, BallPredictionData.TargetData>();  // 成功进入目标点的数据
+    private List<BallPredictionData.TransformInfo> currentTrajectory;        // 当前轨迹
+    private bool isComputing = false;  // 是否正在计算中
 
     void Start()
     {
@@ -73,9 +69,17 @@ public class BallPredictionController : MonoBehaviour
         }
 
         // 初始化数据结构
-        launchParamsCache = new Dictionary<Transform, List<(Vector2, Vector2)>>();
-        successRates = new Dictionary<Transform, (int, int)>();
-        targetForceRanges = new Dictionary<Transform, List<(float, float)>>();
+        targetDatas = new Dictionary<Transform, BallPredictionData.TargetData>();
+        foreach (var target in targetPoints)
+        {
+            targetDatas[target] = new BallPredictionData.TargetData
+            {
+                targetName = target.name,
+                targetPosition = target.position,
+                successCount = 0,
+                totalAttempts = 0
+            };
+        }
 
         // 更新显示的柱子组合
         UpdatePinsConfiguration();
@@ -89,6 +93,11 @@ public class BallPredictionController : MonoBehaviour
     {
         // 保存当前柱子组合的索引
         int originalPinsIndex = currentPinsIndex;
+
+        if (forceRecalculate)
+        {
+            predictionData.ClearData();
+        }
 
         // 遍历所有柱子组合
         for (int i = 0; i < pinsList.Length; i++)
@@ -107,7 +116,7 @@ public class BallPredictionController : MonoBehaviour
 
             // 检查是否有已保存的数据
             string configName = $"PinsConfig_{i}";
-            bool loadSuccess = !forceRecalculate && predictionData.LoadData(configName, out launchParamsCache, out successRates, out targetForceRanges);
+            bool loadSuccess = !forceRecalculate && LoadData(configName);
 
             if (!loadSuccess)
             {
@@ -131,10 +140,6 @@ public class BallPredictionController : MonoBehaviour
             pinsList[i].SetActive(i == currentPinsIndex);
         }
 
-        // 加载当前柱子组合的数据
-        string currentConfigName = $"PinsConfig_{currentPinsIndex}";
-        predictionData.LoadData(currentConfigName, out launchParamsCache, out successRates, out targetForceRanges);
-
         computationStatus = "所有柱子组合的数据计算完成 (100%)";
         Debug.Log("所有柱子组合的数据计算完成");
     }
@@ -152,21 +157,23 @@ public class BallPredictionController : MonoBehaviour
         isComputing = true;
 
         // 清空所有数据
-        launchParamsCache.Clear();
-        successRates.Clear();
-        targetForceRanges.Clear();
+        targetDatas.Clear();
         totalSimulationAttempts = 0;
+
+        foreach (var target in targetPoints)
+        {
+            targetDatas[target] = new BallPredictionData.TargetData
+            {
+                targetName = target.name,
+                targetPosition = target.position,
+                successCount = 0,
+                totalAttempts = 0
+            };
+            targetStatus[target] = "等待计算";
+        }
 
         // 用于检查重复值的集合
         HashSet<(float x, float force)> usedParams = new HashSet<(float x, float force)>();
-
-        // 初始化成功率统计和力量值区间
-        foreach (var target in targetPoints)
-        {
-            successRates[target] = (0, 0);
-            targetStatus[target] = "等待计算";
-            targetForceRanges[target] = new List<(float, float)>();
-        }
 
         while (totalSimulationAttempts < maxSimulationAttempts)
         {
@@ -174,8 +181,7 @@ public class BallPredictionController : MonoBehaviour
             bool allTargetsCompleted = true;
             foreach (var target in targetPoints)
             {
-                var (successCount, _) = successRates[target];
-                if (successCount < requiredSuccessCount)
+                if (targetDatas[target].successCount < requiredSuccessCount)
                 {
                     allTargetsCompleted = false;
                     break;
@@ -192,8 +198,7 @@ public class BallPredictionController : MonoBehaviour
             Transform targetToTry = null;
             foreach (var target in targetPoints)
             {
-                var (successCount, totalAttempts) = successRates[target];
-                if (successCount < requiredSuccessCount)
+                if (targetDatas[target].successCount < requiredSuccessCount)
                 {
                     targetToTry = target;
                     break;
@@ -222,32 +227,36 @@ public class BallPredictionController : MonoBehaviour
             }
             usedParams.Add(paramKey);
 
-            // 增加当前目标点的尝试次数并更新successRates
-            var (currentSuccessCount, currentTotalAttempts) = successRates[targetToTry];
-            successRates[targetToTry] = (currentSuccessCount, currentTotalAttempts + 1);
+            // 增加当前目标点的尝试次数
+            targetDatas[targetToTry].totalAttempts++;
 
-            var (finalPosition, hitTarget) = SimulateAndRecord(basePosition, baseForce);
+            var (finalPosition, hitTarget, simulationTime) = SimulateAndRecord(basePosition, baseForce);
             totalSimulationAttempts++;
 
             // 记录所有成功的数据
             if (hitTarget != null)
             {
                 // 更新被击中目标点的统计
-                var (hitSuccessCount, hitTotalAttempts) = successRates[hitTarget];
-                successRates[hitTarget] = (hitSuccessCount + 1, hitTotalAttempts);
-
-                // 记录成功数据
-                if (!launchParamsCache.ContainsKey(hitTarget))
-                {
-                    launchParamsCache[hitTarget] = new List<(Vector2, Vector2)>();
-                }
-                launchParamsCache[hitTarget].Add((basePosition, baseForce));
+                targetDatas[hitTarget].successCount++;
 
                 // 更新成功的力量值区间
                 UpdateSuccessfulForceRanges(hitTarget, currentForce);
 
                 // 更新目标点状态
-                targetStatus[hitTarget] = $"成功: {hitSuccessCount + 1}/{requiredSuccessCount}";
+                targetStatus[hitTarget] = $"成功: {targetDatas[hitTarget].successCount}/{requiredSuccessCount}";
+
+                if (targetDatas[hitTarget].successCount < requiredSuccessCount)
+                {
+                    // 记录成功数据
+                    var launchData = new BallPredictionData.LaunchData
+                    {
+                        position = basePosition,
+                        force = baseForce,
+                        trajectory = new List<BallPredictionData.TransformInfo>(currentTrajectory),
+                        trajectoryTime = simulationTime
+                    };
+                    targetDatas[hitTarget].successfulLaunches.Add(launchData);
+                }
             }
 
             // 每计算100次输出一次进度
@@ -256,12 +265,11 @@ public class BallPredictionController : MonoBehaviour
                 float totalProgress = (float)currentPinsIndex / pinsList.Length * 100f;
                 foreach (var target in targetPoints)
                 {
-                    var (successCount, _) = successRates[target];
-                    Debug.Log($"目标点 {target.name}: {successCount}/{requiredSuccessCount}, 尝试次数: {successRates[targetToTry].totalAttempts}, 总尝试 {totalSimulationAttempts} 次");
+                    Debug.Log($"目标点 {target.name}: {targetDatas[target].successCount}/{requiredSuccessCount}, 尝试次数: {targetDatas[target].totalAttempts}, 总尝试 {totalSimulationAttempts} 次");
                 }
 
                 // 计算并显示完成率
-                int completedCount = targetPoints.Count(t => successRates[t].successCount >= requiredSuccessCount);
+                int completedCount = targetPoints.Count(t => targetDatas[t].successCount >= requiredSuccessCount);
                 float completionRate = (float)completedCount / targetPoints.Length * 100f;
                 Debug.Log($"当前完成率: {completionRate:F1}% ({completedCount}/{targetPoints.Length})");
                 computationStatus = $"总进度: {totalProgress:F1}% - 柱子组合 {currentPinsIndex}/{pinsList.Length - 1} - 目标点: {targetToTry?.name ?? "无"}，进度: {completionRate:F1}%";
@@ -276,10 +284,10 @@ public class BallPredictionController : MonoBehaviour
         Debug.Log("\n各目标点的成功力量区间：");
         foreach (var target in targetPoints)
         {
-            if (targetForceRanges.ContainsKey(target) && targetForceRanges[target].Count > 0)
+            if (targetDatas[target].forceRanges.Count > 0)
             {
                 Debug.Log($"\n目标点 {target.name} 的成功力量区间：");
-                var ranges = targetForceRanges[target];
+                var ranges = targetDatas[target].forceRanges;
                 for (int i = 0; i < ranges.Count; i++)
                 {
                     var range = ranges[i];
@@ -294,16 +302,17 @@ public class BallPredictionController : MonoBehaviour
 
         // 更新所有目标点的状态
         Debug.Log("计算完成，统计各目标点成功率：");
-        foreach (var kvp in successRates)
+        foreach (var target in targetPoints)
         {
-            int totalAttempts = kvp.Value.totalAttempts == 0 ? requiredSuccessCount : kvp.Value.totalAttempts;
-            float successRate = (float)kvp.Value.successCount / totalAttempts * 100;
-            targetStatus[kvp.Key] = $"成功率: {successRate:F2}% ({kvp.Value.successCount}/{totalAttempts})";
-            Debug.Log($"目标点 {kvp.Key.name}: 成功率 {successRate:F2}%, 成功 {kvp.Value.successCount} 次, 总尝试 {totalAttempts} 次");
+            var targetData = targetDatas[target];
+            int totalAttempts = targetData.totalAttempts == 0 ? requiredSuccessCount : targetData.totalAttempts;
+            float successRate = (float)targetData.successCount / totalAttempts * 100;
+            targetStatus[target] = $"成功率: {successRate:F2}% ({targetData.successCount}/{totalAttempts})";
+            Debug.Log($"目标点 {target.name}: 成功率 {successRate:F2}%, 成功 {targetData.successCount} 次, 总尝试 {totalAttempts} 次");
         }
 
         // 在计算完成后保存数据
-        SavePredictionData();
+        SaveAllData();
 
         isComputing = false;
         float finalProgress = (float)(currentPinsIndex + 1) / pinsList.Length * 100f;
@@ -318,8 +327,7 @@ public class BallPredictionController : MonoBehaviour
         int completedTargets = 0;
         foreach (var t in targetPoints)
         {
-            var (successCount, _) = successRates[t];
-            if (successCount >= requiredSuccessCount)
+            if (targetDatas[t].successCount >= requiredSuccessCount)
             {
                 completedTargets++;
             }
@@ -328,10 +336,10 @@ public class BallPredictionController : MonoBehaviour
         float completionRate = (float)completedTargets / targetPoints.Length;
 
         // 如果60%以上的目标点已完成，且当前目标点有成功的力量区间
-        if (completionRate >= 0.6f && targetForceRanges.ContainsKey(target) && targetForceRanges[target].Count > 0)
+        if (completionRate >= 0.6f && targetDatas[target].forceRanges.Count > 0)
         {
             // 从当前目标点的成功区间中随机选择一个区间
-            var ranges = targetForceRanges[target];
+            var ranges = targetDatas[target].forceRanges;
             var selectedRange = ranges[Random.Range(0, ranges.Count)];
 
             // 在选中的区间内随机生成力量值
@@ -345,12 +353,7 @@ public class BallPredictionController : MonoBehaviour
     // 更新成功的力量值区间
     private void UpdateSuccessfulForceRanges(Transform target, float successfulForce)
     {
-        if (!targetForceRanges.ContainsKey(target))
-        {
-            targetForceRanges[target] = new List<(float, float)>();
-        }
-
-        var ranges = targetForceRanges[target];
+        var ranges = targetDatas[target].forceRanges;
 
         // 检查是否可以与现有区间合并
         for (int i = 0; i < ranges.Count; i++)
@@ -372,10 +375,14 @@ public class BallPredictionController : MonoBehaviour
     }
 
     // 模拟并记录结果
-    private (Vector2, Transform) SimulateAndRecord(Vector2 basePosition, Vector2 baseForce)
+    private (Vector2, Transform, float) SimulateAndRecord(Vector2 basePosition, Vector2 baseForce)
     {
-        currentTrajectory = new List<Vector2>();
-        currentTrajectory.Add(basePosition);
+        currentTrajectory = new List<BallPredictionData.TransformInfo>
+        {
+            new BallPredictionData.TransformInfo(
+                new Vector3(basePosition.x, basePosition.y, 0),
+                Quaternion.identity.eulerAngles.z)
+        };
 
         GameObject simulatedBall = Instantiate(ballPrefab, basePosition, Quaternion.identity, spawnArea);
         simulatedBall.SetActive(true);
@@ -401,9 +408,9 @@ public class BallPredictionController : MonoBehaviour
             simulationTime += Time.fixedDeltaTime;
 
             finalPosition = rb.position;
-            currentTrajectory.Add(finalPosition);
+            // 记录轨迹点
+            currentTrajectory.Add(new BallPredictionData.TransformInfo(rb.transform));
 
-            // 检查是否与任何目标点发生碰撞
             if (ballContrl.hasCollided)
             {
                 Debug.Log($"与目标点 {ballContrl.hitTarget.name} 发生碰撞！");
@@ -411,7 +418,6 @@ public class BallPredictionController : MonoBehaviour
                 break;
             }
 
-            // 如果小球停止运动也结束模拟
             if (rb.velocity.magnitude < 0.01f)
             {
                 Debug.Log($"模拟结束 - 小球停止运动 最终落点: {finalPosition}");
@@ -421,106 +427,101 @@ public class BallPredictionController : MonoBehaviour
 
         // 恢复原来的模拟模式
         Physics2D.simulationMode = previousSimulationMode;
-
-        // 清理临时对象
         Destroy(simulatedBall);
 
-        return (finalPosition, ballContrl.hitTarget);
+        return (finalPosition, ballContrl.hitTarget, simulationTime);
     }
 
     // 当弹簧释放时调用此方法
     public void OnSpringReleased(GameObject ball, float springPercentage)
     {
-        // 获取目标点
         Transform targetPoint = useRandomTarget ?
             targetPoints[Random.Range(0, targetPoints.Length)] :
             selectedTargetPoint;
 
-        if (targetPoint != null)
+        // 获取当前柱子组合的数据
+        string configName = $"PinsConfig_{currentPinsIndex}";
+        if (!LoadData(configName))
         {
-            // 获取当前柱子组合的数据
-            string configName = $"PinsConfig_{currentPinsIndex}";
-            Dictionary<Transform, List<(Vector2 position, Vector2 force)>> currentLaunchParams;
-            Dictionary<Transform, (int successCount, int totalAttempts)> currentSuccessRates;
-            Dictionary<Transform, List<(float minForce, float maxForce)>> currentForceRanges;
+            Debug.LogError($"柱子组合 {currentPinsIndex} 的数据加载失败");
+            return;
+        }
 
-            if (predictionData.LoadData(configName, out currentLaunchParams, out currentSuccessRates, out currentForceRanges))
+        if (targetPoint != null && targetDatas.ContainsKey(targetPoint))
+        {
+            var targetData = targetDatas[targetPoint];
+            if (targetData.successfulLaunches.Count > 0)
             {
-                // 获取该目标点的所有成功发射参数
-                if (currentLaunchParams.ContainsKey(targetPoint) && currentLaunchParams[targetPoint].Count > 0)
-                {
-                    // 获取当前小球位置
-                    var currentX = ball.transform.position.x;
+                var currentX = ball.transform.position.x;
 
-                    // 只按力量大小排序
-                    var suitableParams = currentLaunchParams[targetPoint]
-                        .OrderBy(p => p.force.y)
+                // 按力量大小排序
+                var suitableLaunches = targetData.successfulLaunches
+                    .OrderBy(l => l.force.y)
+                    .ToList();
+
+                if (suitableLaunches.Count > 0)
+                {
+                    float minForce = suitableLaunches[0].force.y;
+                    float maxForce = suitableLaunches[suitableLaunches.Count - 1].force.y;
+                    float forceRange = maxForce - minForce;
+
+                    // 根据弹簧位置选择不同区间的力量
+                    int startIndex, endIndex;
+                    if (springPercentage >= 0.7f)
+                    {
+                        float targetForce = minForce + forceRange * 0.7f;
+                        startIndex = suitableLaunches.FindIndex(l => l.force.y >= targetForce);
+                        endIndex = suitableLaunches.Count - 1;
+                    }
+                    else if (springPercentage >= 0.3f)
+                    {
+                        float minTargetForce = minForce + forceRange * 0.3f;
+                        float maxTargetForce = minForce + forceRange * 0.7f;
+                        startIndex = suitableLaunches.FindIndex(l => l.force.y >= minTargetForce);
+                        endIndex = suitableLaunches.FindLastIndex(l => l.force.y <= maxTargetForce);
+                    }
+                    else
+                    {
+                        float targetForce = minForce + forceRange * 0.3f;
+                        startIndex = 0;
+                        endIndex = suitableLaunches.FindLastIndex(l => l.force.y <= targetForce);
+                    }
+
+                    if (startIndex < 0) startIndex = 0;
+                    if (endIndex >= suitableLaunches.Count) endIndex = suitableLaunches.Count - 1;
+                    if (startIndex > endIndex) startIndex = endIndex;
+
+                    // 在选定的区间内筛选x距离小于0.1的参数
+                    var closeLaunches = suitableLaunches
+                        .Skip(startIndex)
+                        .Take(endIndex - startIndex + 1)
+                        .Where(l => Mathf.Abs(l.position.x - currentX) < 0.1f)
                         .ToList();
 
-                    if (suitableParams.Count > 0)
-                    {
-                        // 分析力量值的分布
-                        float minForce = suitableParams[0].force.y;
-                        float maxForce = suitableParams[suitableParams.Count - 1].force.y;
-                        float forceRange = maxForce - minForce;
-
-                        // 根据弹簧位置选择不同区间的力量
-                        int startIndex, endIndex;
-                        if (springPercentage >= 0.7f) // 弹簧拉到70%以上，取最大力量区间
-                        {
-                            float targetForce = minForce + forceRange * 0.7f;
-                            startIndex = suitableParams.FindIndex(p => p.force.y >= targetForce);
-                            endIndex = suitableParams.Count - 1;
-                        }
-                        else if (springPercentage >= 0.3f) // 弹簧拉到30%-70%之间，取中等力量区间
-                        {
-                            float minTargetForce = minForce + forceRange * 0.3f;
-                            float maxTargetForce = minForce + forceRange * 0.7f;
-                            startIndex = suitableParams.FindIndex(p => p.force.y >= minTargetForce);
-                            endIndex = suitableParams.FindLastIndex(p => p.force.y <= maxTargetForce);
-                        }
-                        else // 弹簧拉到30%以下，取最小力量区间
-                        {
-                            float targetForce = minForce + forceRange * 0.3f;
-                            startIndex = 0;
-                            endIndex = suitableParams.FindLastIndex(p => p.force.y <= targetForce);
-                        }
-
-                        // 确保索引有效
-                        if (startIndex < 0) startIndex = 0;
-                        if (endIndex >= suitableParams.Count) endIndex = suitableParams.Count - 1;
-                        if (startIndex > endIndex) startIndex = endIndex;
-
-                        // 在选定的区间内筛选x距离小于0.1的参数
-                        var closeParams = suitableParams
+                    // 如果没有找到x距离小于0.1的参数，则使用距离最近的参数
+                    var selectedLaunch = closeLaunches.Count > 0
+                        ? closeLaunches[Random.Range(0, closeLaunches.Count)]
+                        : suitableLaunches
                             .Skip(startIndex)
                             .Take(endIndex - startIndex + 1)
-                            .Where(p => Mathf.Abs(p.position.x - currentX) < 0.1f)
-                            .ToList();
+                            .OrderBy(l => Mathf.Abs(l.position.x - currentX))
+                            .First();
 
-                        // 如果没有找到x距离小于0.1的参数，则使用距离最近的参数
-                        var selectedParams = closeParams.Count > 0
-                            ? closeParams[Random.Range(0, closeParams.Count)]
-                            : suitableParams
-                                .Skip(startIndex)
-                                .Take(endIndex - startIndex + 1)
-                                .OrderBy(p => Mathf.Abs(p.position.x - currentX))
-                                .First();
+                    var ballController = ball.GetComponent<BallController>();
+                    if (ballController != null)
+                    {
+                        ballController.SetTargetPosition(
+                            selectedLaunch.trajectory,
+                            selectedLaunch.trajectoryTime
+                        );
 
-                        var ballController = ball.GetComponent<BallController>();
-                        if (ballController != null)
-                        {
-                            // 打印日志
-                            float xDistance = Mathf.Abs(ball.transform.position.x - selectedParams.position.x);
-                            Debug.Log($"当前柱子组合: {currentPinsIndex}, " +
-                                    $"弹簧位置百分比: {springPercentage:F2}, " +
-                                    $"选择的力量: {selectedParams.force.y:F2}, " +
-                                    $"X轴距离: {xDistance:F2}, " +
-                                    $"力量区间: {(springPercentage >= 0.7f ? "最大" : springPercentage >= 0.3f ? "中等" : "最小")}, " +
-                                    $"力量范围: {minForce:F2}-{maxForce:F2}");
-
-                            ballController.SetTargetPosition(selectedParams.position, selectedParams.force);
-                        }
+                        float xDistance = Mathf.Abs(ball.transform.position.x - selectedLaunch.position.x);
+                        Debug.Log($"当前柱子组合: {currentPinsIndex}, " +
+                                $"弹簧位置百分比: {springPercentage:F2}, " +
+                                $"选择的力量: {selectedLaunch.force.y:F2}, " +
+                                $"X轴距离: {xDistance:F2}, " +
+                                $"力量区间: {(springPercentage >= 0.7f ? "最大" : springPercentage >= 0.3f ? "中等" : "最小")}, " +
+                                $"力量范围: {minForce:F2}-{maxForce:F2}");
                     }
                 }
             }
@@ -546,7 +547,7 @@ public class BallPredictionController : MonoBehaviour
             Gizmos.color = trajectoryColor;
             for (int i = 0; i < currentTrajectory.Count - 1; i++)
             {
-                Gizmos.DrawLine(currentTrajectory[i], currentTrajectory[i + 1]);
+                Gizmos.DrawLine(currentTrajectory[i].position, currentTrajectory[i + 1].position);
             }
         }
 
@@ -558,10 +559,10 @@ public class BallPredictionController : MonoBehaviour
             {
                 Gizmos.DrawWireSphere(target.position, debugPointSize);
                 // 显示坐标和成功率
-                if (successRates != null && successRates.ContainsKey(target))
+                if (targetDatas.ContainsKey(target))
                 {
-                    var (successCount, totalAttempts) = successRates[target];
-                    float successRate = totalAttempts > 0 ? (float)successCount / totalAttempts * 100 : 0;
+                    var targetData = targetDatas[target];
+                    float successRate = targetData.totalAttempts > 0 ? (float)targetData.successCount / targetData.totalAttempts * 100 : 0;
                     UnityEditor.Handles.Label(target.position + Vector3.up * 0.5f,
                         $"目标点: {target.position}\n" +
                         $"成功率: {successRate:F2}%");
@@ -581,12 +582,13 @@ public class BallPredictionController : MonoBehaviour
     }
 #endif
 
-    private void SavePredictionData()
+    // 在最后保存所有数据
+    private void SaveAllData()
     {
         if (predictionData != null)
         {
             string configName = $"PinsConfig_{currentPinsIndex}";
-            predictionData.SaveData(configName, launchParamsCache, successRates, targetForceRanges, totalSimulationAttempts);
+            predictionData.SaveData(configName, targetDatas, totalSimulationAttempts);
 
             // 只在编辑器中执行保存操作
 #if UNITY_EDITOR
@@ -634,9 +636,17 @@ public class BallPredictionController : MonoBehaviour
                 pinsList[i].SetActive(i == currentPinsIndex);
             }
         }
+    }
 
-        // 加载当前组合的数据
-        string configName = $"PinsConfig_{currentPinsIndex}";
-        predictionData.LoadData(configName, out launchParamsCache, out successRates, out targetForceRanges);
+    // 修改 LoadData 方法
+    private bool LoadData(string configName)
+    {
+        Dictionary<Transform, BallPredictionData.TargetData> loadedTargetDatas;
+        if (predictionData.LoadData(configName, out loadedTargetDatas))
+        {
+            targetDatas = loadedTargetDatas;
+            return true;
+        }
+        return false;
     }
 }

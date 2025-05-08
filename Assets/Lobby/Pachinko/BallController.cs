@@ -1,56 +1,53 @@
 using UnityEngine;
+using System.Collections.Generic;
 
 public class BallController : MonoBehaviour
 {
     public bool hasCollided = false;    // 是否碰撞
     public Transform hitTarget; // 碰撞目标
-    private Vector2? targetPosition; // 目标位置
-    private Vector2? targetForce; // 目标力量
-    private bool isMovingToPosition = false;
-    private float moveSpeed = 5f; // 移动速度
+    private List<BallPredictionData.TransformInfo> trajectory; // 轨迹
+    private float trajectoryTime; // 轨迹总时间
+    private float currentTime = 0f; // 当前时间
+    private bool isPlayingTrajectory = false; // 是否正在播放轨迹
 
-    public void SetTargetPosition(Vector2 position, Vector2 force)
+    public void SetTargetPosition(List<BallPredictionData.TransformInfo> newTrajectory = null, float newTrajectoryTime = 0f)
     {
-        targetPosition = position;
-        targetForce = force;
-        isMovingToPosition = true;
+        trajectory = newTrajectory;
+        trajectoryTime = newTrajectoryTime;
+        isPlayingTrajectory = newTrajectory != null && newTrajectory.Count > 0;
+        currentTime = 0f;
     }
 
-    private void FixedUpdate()
+    void Update()
     {
-        if (isMovingToPosition && targetPosition.HasValue)
+        if (isPlayingTrajectory && trajectory != null)
         {
-            // 计算目标位置（保持当前Y轴位置，只移动X轴）
-            Vector2 currentTarget = new Vector2(
-                targetPosition.Value.x,
-                transform.position.y
-            );
-
-            // 平滑移动到目标位置
-            transform.position = Vector2.MoveTowards(
-                transform.position,
-                currentTarget,
-                moveSpeed * Time.fixedDeltaTime
-            );
-
-            // 如果到达目标位置
-            if (Vector2.Distance(transform.position, currentTarget) < 0.01f)
+            // 计算当前应该显示的位置
+            currentTime += Time.deltaTime;
+            if (currentTime >= trajectoryTime)
             {
-                transform.position = (Vector3)targetPosition;
-                isMovingToPosition = false;
-                
-                // 初始化小球速度并施加目标力量
-                var rb = GetComponent<Rigidbody2D>();
-                if (rb != null && targetForce.HasValue)
-                {
-                    rb.velocity = Vector2.zero;
-                    rb.AddForce(targetForce.Value, ForceMode2D.Impulse);
-                }
-                
-                // 重置状态
-                targetPosition = null;
-                targetForce = null;
+                isPlayingTrajectory = false;
+                return;
             }
+
+            float normalizedTime = currentTime / trajectoryTime;
+            float exactIndex = normalizedTime * (trajectory.Count - 1);
+            int currentIndex = Mathf.FloorToInt(exactIndex);
+            int nextIndex = Mathf.Min(currentIndex + 1, trajectory.Count - 1);
+            float t = exactIndex - currentIndex;
+
+            // 直接进行插值计算
+            transform.position = Vector3.Lerp(
+                trajectory[currentIndex].GetPosition(),
+                trajectory[nextIndex].GetPosition(),
+                t
+            );
+
+            transform.rotation = Quaternion.Lerp(
+                trajectory[currentIndex].GetRotation(),
+                trajectory[nextIndex].GetRotation(),
+                t
+            );
         }
     }
 

@@ -5,14 +5,58 @@ using System.Collections.Generic;
 public class BallPredictionData : ScriptableObject
 {
     [System.Serializable]
+    public struct TransformInfo
+    {
+        public Vector2 position;
+        public float rotation; // 使用角度表示旋转
+
+        public TransformInfo(Vector2 pos, float rot)
+        {
+            position = pos;
+            rotation = rot;
+        }
+
+        public TransformInfo(Transform transform)
+        {
+            position = transform.position;
+            rotation = transform.rotation.eulerAngles.z;
+        }
+
+        // 转换为 Transform 数据
+        public Vector3 GetPosition()
+        {
+            return new Vector3(position.x, position.y, 0);
+        }
+
+        public Quaternion GetRotation()
+        {
+            return Quaternion.Euler(0, 0, rotation);
+        }
+    }
+
+    [System.Serializable]
+    public struct LaunchData
+    {
+        public Vector2 position;
+        public Vector2 force;
+        public List<TransformInfo> trajectory;
+        public float trajectoryTime;
+    }
+
+    [System.Serializable]
     public class TargetData
     {
         public string targetName;
         public Vector3 targetPosition;
-        public List<Vector2> successfulPositions = new List<Vector2>();
-        public List<Vector2> successfulForces = new List<Vector2>();
+
+        // 存储成功发射的参数
+        public List<LaunchData> successfulLaunches = new List<LaunchData>();
+
+        // 成功率统计
         public int successCount;
         public int totalAttempts;
+
+        // 力量区间
         public List<(float minForce, float maxForce)> forceRanges = new List<(float, float)>();
     }
 
@@ -34,11 +78,7 @@ public class BallPredictionData : ScriptableObject
         currentConfigurationName = "";
     }
 
-    public void SaveData(string configurationName,
-                        Dictionary<Transform, List<(Vector2 position, Vector2 force)>> launchParamsCache,
-                        Dictionary<Transform, (int successCount, int totalAttempts)> successRates,
-                        Dictionary<Transform, List<(float minForce, float maxForce)>> targetForceRanges,
-                        int totalAttempts)
+    public void SaveData(string configurationName, Dictionary<Transform, TargetData> targetDatas, int totalAttempts)
     {
         // 查找或创建配置
         var config = pinsConfigurations.Find(c => c.configurationName == configurationName);
@@ -48,54 +88,32 @@ public class BallPredictionData : ScriptableObject
             pinsConfigurations.Add(config);
         }
 
-        // 清除旧数据
+        // 清空现有数据
         config.targetDatas.Clear();
         config.totalSimulationAttempts = totalAttempts;
+        config.isDataValid = true;
 
-        foreach (var kvp in launchParamsCache)
+        // 保存每个目标点的数据
+        foreach (var kvp in targetDatas)
         {
-            var target = kvp.Key;
             var targetData = new TargetData
             {
-                targetName = target.name,
-                targetPosition = target.position
+                targetName = kvp.Key.name,
+                targetPosition = kvp.Key.position,
+                successfulLaunches = new List<LaunchData>(kvp.Value.successfulLaunches),
+                successCount = kvp.Value.successCount,
+                totalAttempts = kvp.Value.totalAttempts,
+                forceRanges = new List<(float, float)>(kvp.Value.forceRanges)
             };
-
-            // 保存成功的位置和力量
-            for (int i = 0; i < kvp.Value.Count; i++)
-            {
-                targetData.successfulPositions.Add(kvp.Value[i].position);
-                targetData.successfulForces.Add(kvp.Value[i].force);
-            }
-
-            // 保存成功率数据
-            if (successRates.ContainsKey(target))
-            {
-                targetData.successCount = successRates[target].successCount;
-                targetData.totalAttempts = successRates[target].totalAttempts;
-            }
-
-            // 保存力量区间
-            if (targetForceRanges.ContainsKey(target))
-            {
-                targetData.forceRanges = targetForceRanges[target];
-            }
-
             config.targetDatas.Add(targetData);
         }
 
-        config.isDataValid = true;
         currentConfigurationName = configurationName;
     }
 
-    public bool LoadData(string configurationName,
-                        out Dictionary<Transform, List<(Vector2 position, Vector2 force)>> launchParamsCache,
-                        out Dictionary<Transform, (int successCount, int totalAttempts)> successRates,
-                        out Dictionary<Transform, List<(float minForce, float maxForce)>> targetForceRanges)
+    public bool LoadData(string configurationName, out Dictionary<Transform, TargetData> targetDatas)
     {
-        launchParamsCache = new Dictionary<Transform, List<(Vector2 position, Vector2 force)>>();
-        successRates = new Dictionary<Transform, (int successCount, int totalAttempts)>();
-        targetForceRanges = new Dictionary<Transform, List<(float minForce, float maxForce)>>();
+        targetDatas = new Dictionary<Transform, TargetData>();
 
         var config = pinsConfigurations.Find(c => c.configurationName == configurationName);
         if (config == null || !config.isDataValid)
@@ -105,23 +123,15 @@ public class BallPredictionData : ScriptableObject
 
         foreach (var targetData in config.targetDatas)
         {
-            var positions = new List<(Vector2 position, Vector2 force)>();
-            for (int i = 0; i < targetData.successfulPositions.Count; i++)
-            {
-                positions.Add((targetData.successfulPositions[i], targetData.successfulForces[i]));
-            }
-
             // 找到对应的Transform
             var target = GameObject.Find(targetData.targetName)?.transform;
             if (target != null)
             {
-                launchParamsCache[target] = positions;
-                successRates[target] = (targetData.successCount, targetData.totalAttempts);
-                targetForceRanges[target] = targetData.forceRanges;
+                targetDatas[target] = targetData;
             }
         }
 
         currentConfigurationName = configurationName;
         return true;
     }
-} 
+}
