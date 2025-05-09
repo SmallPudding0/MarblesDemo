@@ -491,21 +491,13 @@ public class BallPredictionController : MonoBehaviour
                     if (endIndex >= suitableLaunches.Count) endIndex = suitableLaunches.Count - 1;
                     if (startIndex > endIndex) startIndex = endIndex;
 
-                    // 在选定的区间内筛选x距离小于0.1的参数
+                    // 在选定的区间内筛选
                     var closeLaunches = suitableLaunches
                         .Skip(startIndex)
                         .Take(endIndex - startIndex + 1)
-                        .Where(l => Mathf.Abs(l.position.x - currentX) < 0.1f)
                         .ToList();
 
-                    // 如果没有找到x距离小于0.1的参数，则使用距离最近的参数
-                    var selectedLaunch = closeLaunches.Count > 0
-                        ? closeLaunches[Random.Range(0, closeLaunches.Count)]
-                        : suitableLaunches
-                            .Skip(startIndex)
-                            .Take(endIndex - startIndex + 1)
-                            .OrderBy(l => Mathf.Abs(l.position.x - currentX))
-                            .First();
+                    var selectedLaunch = closeLaunches[Random.Range(0, closeLaunches.Count)];
 
                     var ballController = ball.GetComponent<BallController>();
                     if (ballController != null)
